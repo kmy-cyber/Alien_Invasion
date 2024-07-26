@@ -32,12 +32,16 @@ int score = 0; // Puntuación del jugador
 int hp = 3; // Vida del jugador
 int high_score = 0; // Mejor puntuación alcanzada
 int state = 0; // Estado del juego (0: inicio, 1: jugando, 2: fin del juego)
+int player_direction = 0;
+int shooting = 0;
 pthread_mutex_t mutex; // Mutex para sincronizar acceso a recursos compartidos
 
 // Funciones del juego
 void init_game(); // Inicializa el juego al iniciar una nueva partida
 void *game_loop(void *arg); // Bucle principal del juego
 void *input_handler(void *arg); // Manejador de entrada para capturar eventos del usuario
+void *move_handler(void *arg);
+void *shoot_handler(void *arg);
 void move_player(int direction); // Mueve al jugador según la dirección indicada
 void shoot(); // Dispara un proyectil desde la posición del jugador
 void update_projectiles(); // Actualiza la posición de los proyectiles
@@ -68,17 +72,23 @@ int main() {
     init_pair(4, COLOR_RED, COLOR_BLACK);
     init_pair(5, COLOR_YELLOW, COLOR_BLACK);
 
+    player_direction = 0;
+    shooting = 0;
 
-    pthread_t game_thread, input_thread; // Declara los identificadores de los hilos para el juego y el manejo de entrada
+    pthread_t game_thread, input_thread, move_thread, shoot_thread; // Declara los identificadores de los hilos para el juego y el manejo de entrada
     pthread_mutex_init(&mutex, NULL); // Inicializa el mutex para sincronización
 
     // Crea los hilos para el bucle del juego y el manejo de entrada
     pthread_create(&game_thread, NULL, game_loop, NULL);
     pthread_create(&input_thread, NULL, input_handler, NULL);
+    pthread_create(&move_thread, NULL, move_handler, NULL);
+    pthread_create(&shoot_thread, NULL, shoot_handler, NULL);
 
-    // Espera a que ambos hilos terminen antes de continuar
+    // Espera a que los hilos terminen antes de continuar
     pthread_join(game_thread, NULL);
     pthread_join(input_thread, NULL);
+    pthread_join(move_thread, NULL);
+    pthread_join(shoot_thread, NULL);
 
     endwin();// Finaliza el modo ncurses
     pthread_mutex_destroy(&mutex);// Destruye el mutex
@@ -180,14 +190,20 @@ void *input_handler(void *arg) {
             switch (ch) {
                 case 'a':
                 case KEY_LEFT:
-                    move_player(KEY_LEFT);
+                    player_direction = -1;
                     break;
                 case 'd':
                 case KEY_RIGHT:
-                    move_player(KEY_RIGHT);
+                    player_direction = 1;
+                    break;
+                case 's': // Detener movimiento
+                    player_direction = 0;
                     break;
                 case ' ':
-                    shoot();
+                    shooting = 1;
+                    break;
+                case 'f': // Detener disparo
+                    shooting = 0;
                     break;
                 case 'q':
                     running = 0;
@@ -206,11 +222,35 @@ void *input_handler(void *arg) {
     return NULL;
 }
 
+void *move_handler(void *arg) {
+    while (running) {
+        pthread_mutex_lock(&mutex);
+        if (player_direction != 0) {
+            move_player(player_direction);
+        }
+        pthread_mutex_unlock(&mutex);
+        usleep(50000); // Controla la velocidad del movimiento (50 ms)
+    }
+    return NULL;
+}
+
+void *shoot_handler(void *arg) {
+    while (running) {
+        pthread_mutex_lock(&mutex);
+        if (shooting) {
+            shoot();
+        }
+        pthread_mutex_unlock(&mutex);
+        usleep(1000); // Controla la velocidad del disparo (100 ms)
+    }
+    return NULL;
+}
+
 // Mueve al jugador según la dirección ingresada por el usuario
 void move_player(int direction) {
-    if (direction == KEY_LEFT && player.x > 2) {
+    if (direction == -1 && player.x > 2) {
         player.x--;
-    } else if (direction == KEY_RIGHT && player.x < COLS - 3) {
+    } else if (direction == 1 && player.x < COLS - 3) {
         player.x++;
     }
 }
@@ -344,6 +384,7 @@ void draw_borders() {
     }
 }
 
+// Dibuja la nave del jugador en su posición
 void draw_ship(int x, int y) {
     
     
@@ -376,16 +417,22 @@ void draw_ship(int x, int y) {
 void draw_enemy(int x, int y, int type) {
     switch (type) {
         case 0:
+            attron(COLOR_PAIR(3));
             mvprintw(y, x - 2, " (@@) ");
             mvprintw(y + 1, x - 2, " /\"\"\\ ");
+            attroff(COLOR_PAIR(3));
             break;
         case 1:
+            attron(COLOR_PAIR(5));
             mvprintw(y, x - 2, " dOOb ");
             mvprintw(y + 1, x - 2, " ^/\\^ ");
+            attroff(COLOR_PAIR(5));
             break;
         case 2:
+            attron(COLOR_PAIR(4));
             mvprintw(y, x - 2, " /MM\\ ");
             mvprintw(y + 1, x - 2, " |~~| ");
+            attroff(COLOR_PAIR(4));
             break;
     }
 }
@@ -408,7 +455,9 @@ void update_score(int type) {
 // Muestra la pantalla de inicio con instrucciones para comenzar o salir
 void draw_start_screen() {
     clear();
+    attron(COLOR_PAIR(2));
     mvprintw(LINES / 2 - 2, COLS / 2 - 10, "Space Shooter Game");
+    attroff(COLOR_PAIR(2));
     mvprintw(LINES / 2, COLS / 2 - 10, "Press 'n' to Start New Game");
     mvprintw(LINES / 2 + 1, COLS / 2 - 10, "Press 'q' to Quit");
     mvprintw(LINES / 2 + 2, COLS / 2 - 10, "High Score: %d", high_score);
@@ -418,7 +467,9 @@ void draw_start_screen() {
 // Muestra la pantalla de fin del juego con puntuación y opciones
 void draw_game_over_screen() {
     clear();
+    attron(COLOR_PAIR(4));
     mvprintw(LINES / 2 - 2, COLS / 2 - 10, "Game Over");
+    attroff(COLOR_PAIR(4));
     mvprintw(LINES / 2, COLS / 2 - 10, "Press 'r' to Return to Start Screen");
     mvprintw(LINES / 2 + 1, COLS / 2 - 10, "Press 'q' to Quit");
     mvprintw(LINES / 2 + 2, COLS / 2 - 10, "Score: %d", score);
