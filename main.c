@@ -8,6 +8,7 @@
 #define MAX_PROJECTILES 5 // Máximo número de proyectiles que puede tener el jugador
 #define MAX_ENEMIES 5 // Máximo número de enemigos en el juego
 #define SPEED_LOW_ENEMIES 10 // Velocidad de movimiento de los enemigos
+#define MAX_SAVED_GAMES 3; 
 
 typedef struct {
     int x, y;
@@ -376,16 +377,22 @@ void draw_ship(int x, int y) {
 void draw_enemy(int x, int y, int type) {
     switch (type) {
         case 0:
+            attron(COLOR_PAIR(3));
             mvprintw(y, x - 2, " (@@) ");
             mvprintw(y + 1, x - 2, " /\"\"\\ ");
+            attroff(COLOR_PAIR(3));
             break;
         case 1:
+            attron(COLOR_PAIR(5));
             mvprintw(y, x - 2, " dOOb ");
             mvprintw(y + 1, x - 2, " ^/\\^ ");
+            attroff(COLOR_PAIR(5));
             break;
         case 2:
+            attron(COLOR_PAIR(4));
             mvprintw(y, x - 2, " /MM\\ ");
             mvprintw(y + 1, x - 2, " |~~| ");
+            attroff(COLOR_PAIR(4));
             break;
     }
 }
@@ -408,7 +415,9 @@ void update_score(int type) {
 // Muestra la pantalla de inicio con instrucciones para comenzar o salir
 void draw_start_screen() {
     clear();
+    attron(COLOR_PAIR(1));
     mvprintw(LINES / 2 - 2, COLS / 2 - 10, "Space Shooter Game");
+    attroff(COLOR_PAIR(1));
     mvprintw(LINES / 2, COLS / 2 - 10, "Press 'n' to Start New Game");
     mvprintw(LINES / 2 + 1, COLS / 2 - 10, "Press 'q' to Quit");
     mvprintw(LINES / 2 + 2, COLS / 2 - 10, "High Score: %d", high_score);
@@ -418,7 +427,9 @@ void draw_start_screen() {
 // Muestra la pantalla de fin del juego con puntuación y opciones
 void draw_game_over_screen() {
     clear();
+    attron(COLOR_PAIR(4));
     mvprintw(LINES / 2 - 2, COLS / 2 - 10, "Game Over");
+    attroff(COLOR_PAIR(4));
     mvprintw(LINES / 2, COLS / 2 - 10, "Press 'r' to Return to Start Screen");
     mvprintw(LINES / 2 + 1, COLS / 2 - 10, "Press 'q' to Quit");
     mvprintw(LINES / 2 + 2, COLS / 2 - 10, "Score: %d", score);
