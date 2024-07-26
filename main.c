@@ -8,15 +8,24 @@
 #define MAX_PROJECTILES 5 // Máximo número de proyectiles que puede tener el jugador
 #define MAX_ENEMIES 5 // Máximo número de enemigos en el juego
 #define SPEED_LOW_ENEMIES 10 // Velocidad de movimiento de los enemigos
-#define MAX_SAVED_GAMES 3; 
+#define MAX_SAVED_GAMES 3; //Maximo de partidas a guardar
 
 typedef struct {
     int x, y;
 } Position;
+
 typedef struct {
     Position pos;
     int active; // Indica si el proyectil está activo o no
 } Projectile;
+
+typedef struct {
+    int high_score;
+    int score;
+    Position Ship;
+    int lru;
+    int health_points;
+} Saved_Games;
 
 typedef struct {
     Position pos;
@@ -28,6 +37,9 @@ typedef struct {
 Position player; // Posición del jugador
 Projectile projectiles[MAX_PROJECTILES]; // Array de proyectiles
 Enemy enemies[MAX_ENEMIES]; // Array de enemigos
+Saved_Games saved_games[3];
+Saved_Games loaded_game;
+
 int running = 1; // Variable para controlar el estado de ejecución del juego
 int score = 0; // Puntuación del jugador
 int hp = 3; // Vida del jugador
@@ -52,6 +64,9 @@ int check_collision_enemies(Position *ship_parts, Position *parts, int size); //
 void update_score(int type); // Actualiza la puntuación basada en el tipo de enemigo derrotado
 void draw_start_screen(); // Dibuja la pantalla de inicio del juego
 void draw_game_over_screen(); // Dibuja la pantalla de fin del juego
+
+void save_game(const char *filename, Saved_Games *game);
+void load_game(const char *filename, Saved_Games *game);
 
 // Función principal del programa
 int main() {
@@ -94,6 +109,22 @@ void init_game() {
     score = 0; // Resetea la puntuación
     hp = 3; // Resetea la vida del jugador
     
+    // Desactiva todos los proyectiles y enemigos al inicio de una nueva partida
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        projectiles[i].active = 0;
+    }
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        enemies[i].active = 0;
+    }
+}
+
+void startload_game(Saved_Games saved) {
+    player.x = saved.Ship.x; // Coloca al jugador en el centro horizontalmente
+    player.y = saved.Ship.y; // Coloca al jugador cerca del borde inferior
+    score = saved.score; // Resetea la puntuación
+    hp = saved.health_points; // Resetea la vida del jugador
+    high_score = saved.high_score;
+
     // Desactiva todos los proyectiles y enemigos al inicio de una nueva partida
     for (int i = 0; i < MAX_PROJECTILES; i++) {
         projectiles[i].active = 0;
@@ -176,6 +207,10 @@ void *input_handler(void *arg) {
                 init_game();
             } else if (ch == 'q') {
                 running = 0;
+            } else if(ch == 'l'){
+                state = 1;
+                load_game("saved_game.dat", &loaded_game);
+                startload_game(loaded_game);
             }
         } else if (state == 1) {
             switch (ch) {
@@ -192,6 +227,15 @@ void *input_handler(void *arg) {
                     break;
                 case 'q':
                     running = 0;
+                    break;
+                case 's':
+                    Saved_Games game = {high_score,
+                                        score, 
+                                        {player.x, player.y},
+                                         0,
+                                         hp};  
+                    // Guardar el juego en un archivo
+                    save_game("saved_game.dat", &game);
                     break;
             }
         } else if (state == 2) {
@@ -332,6 +376,37 @@ int check_collision_enemies(Position *ship_parts, Position *parts, int size) {
     return 0;
 }
 
+void save_game(const char *filename, Saved_Games *game) {
+    FILE *file = fopen(filename, "wb");
+    if (file == NULL) {
+        perror("Error opening file for writing");
+        return;
+    }
+
+    size_t written = fwrite(game, sizeof(Saved_Games), 1, file);
+    if (written != 1) {
+        perror("Error writing to file");
+    }
+
+    fclose(file);
+}
+
+void load_game(const char *filename, Saved_Games *game) {
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("Error opening file for reading");
+        return;
+    }
+
+    size_t read = fread(game, sizeof(Saved_Games), 1, file);
+    if (read != 1) {
+        perror("Error reading from file");
+    }
+
+    fclose(file);
+}
+
+
 // Dibuja los bordes de la pantalla
 void draw_borders() {
     for (int i = 0; i < COLS; i++) {
@@ -421,8 +496,10 @@ void draw_start_screen() {
     mvprintw(LINES / 2, COLS / 2 - 10, "Press 'n' to Start New Game");
     mvprintw(LINES / 2 + 1, COLS / 2 - 10, "Press 'q' to Quit");
     mvprintw(LINES / 2 + 2, COLS / 2 - 10, "High Score: %d", high_score);
+    mvprintw(LINES / 2 + 3, COLS / 2 - 10, "Press 'l' to Load Games" );
     refresh();
 }
+
 
 // Muestra la pantalla de fin del juego con puntuación y opciones
 void draw_game_over_screen() {
