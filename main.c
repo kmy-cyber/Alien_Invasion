@@ -8,7 +8,8 @@
 #define MAX_PROJECTILES 5 // Máximo número de proyectiles que puede tener el jugador
 #define MAX_ENEMIES 5 // Máximo número de enemigos en el juego
 #define SPEED_LOW_ENEMIES 10 // Velocidad de movimiento de los enemigos
-#define MAX_SAVED_GAMES 3; //Maximo de partidas a guardar
+#define MAX_SAVED_GAMES 3 //Maximo de partidas a guardar
+#define min(x, y) x < y ? x : y
 
 typedef struct {
     int x, y;
@@ -37,7 +38,7 @@ typedef struct {
 Position player; // Posición del jugador
 Projectile projectiles[MAX_PROJECTILES]; // Array de proyectiles
 Enemy enemies[MAX_ENEMIES]; // Array de enemigos
-Saved_Games saved_games[3];
+Saved_Games saved_games[MAX_SAVED_GAMES];
 Saved_Games loaded_game;
 
 int running = 1; // Variable para controlar el estado de ejecución del juego
@@ -45,6 +46,7 @@ int score = 0; // Puntuación del jugador
 int hp = 3; // Vida del jugador
 int high_score = 0; // Mejor puntuación alcanzada
 int state = 0; // Estado del juego (0: inicio, 1: jugando, 2: fin del juego)
+int current_game = -1;
 pthread_mutex_t mutex; // Mutex para sincronizar acceso a recursos compartidos
 
 // Funciones del juego
@@ -65,8 +67,9 @@ void update_score(int type); // Actualiza la puntuación basada en el tipo de en
 void draw_start_screen(); // Dibuja la pantalla de inicio del juego
 void draw_game_over_screen(); // Dibuja la pantalla de fin del juego
 
-void save_game(const char *filename, Saved_Games *game);
-void load_game(const char *filename, Saved_Games *game);
+void save_game(const char *filename, Saved_Games *game); //Guarda partida en el estdo actual
+int load_games(const char *filename, Saved_Games *game, int max); // Carga partidas guardadas
+void display_games(Saved_Games saved_games[], int num_games); //Muestra las partidas guardadas
 
 // Función principal del programa
 int main() {
@@ -118,12 +121,13 @@ void init_game() {
     }
 }
 
+// cargar valores del juego cargado
 void startload_game(Saved_Games saved) {
     player.x = saved.Ship.x; // Coloca al jugador en el centro horizontalmente
-    player.y = saved.Ship.y; // Coloca al jugador cerca del borde inferior
-    score = saved.score; // Resetea la puntuación
-    hp = saved.health_points; // Resetea la vida del jugador
-    high_score = saved.high_score;
+    player.y = LINES - 9; // Coloca al jugador cerca del borde inferior
+    score = saved.score; // Indica la puntuación al valor cargado
+    hp = saved.health_points; // Indica la vida del jugador al valor cargado
+    high_score = saved.high_score; //Indica la mejor puntuacion al valor cargado 
 
     // Desactiva todos los proyectiles y enemigos al inicio de una nueva partida
     for (int i = 0; i < MAX_PROJECTILES; i++) {
@@ -159,6 +163,10 @@ void *game_loop(void *arg) {
                 if (score > high_score) {
                     high_score = score;
                 }
+            }
+            if( score > high_score)
+            {
+                high_score = score;
             }
 
             clear();// Limpia la pantalla antes de dibujar
@@ -204,13 +212,60 @@ void *input_handler(void *arg) {
         if (state == 0) {
             if (ch == 'n') {
                 state = 1;
+                current_game = -1;
                 init_game();
             } else if (ch == 'q') {
                 running = 0;
             } else if(ch == 'l'){
                 state = 1;
-                load_game("saved_game.dat", &loaded_game);
+                // Cargar todos los juegos desde el archivo
+                int num_games = load_games("saved_games.dat", saved_games, MAX_SAVED_GAMES);
+
+                // Mostrar los juegos cargados
+                display_games(saved_games, num_games);
+
+                // Esperar a que el usuario ingrese un número para seleccionar un juego
+                int choice;
+                do {
+                    mvprintw(LINES - 2, 2, "Select a game to load (1 to %d): ", num_games);
+                    choice = getch();
+
+                    if (choice == 'q'){
+                        state = 0;
+                        break;
+                    }
+
+                    choice -= '0';
+                    
+                    if (choice < 1 || choice > num_games) {
+                        mvprintw(LINES - 1, 2, "Invalid selection. Please try again.");
+                        refresh();
+                        usleep(DELAY); // Espera un poco antes de volver a pedir la entrada
+                    }
+                } while (choice < 1 || choice > num_games);
+
+                if (state == 0){
+                    continue;
+                }
+
+                // Guardar que juego se va a cargar
+                current_game = choice - 1;
+
+                for (int i = 0; i < MAX_SAVED_GAMES; i++){
+                    if (saved_games[i].lru > saved_games[current_game].lru){
+                        saved_games[i].lru--;
+                    }
+                }
+
+                // Cargar el juego seleccionado
+                saved_games[current_game].lru = num_games;
+                loaded_game = saved_games[current_game];
+
+                // Sobreescribir las partidas guardadas del juego en un archivo
+                save_game("saved_games.dat", saved_games);
+
                 startload_game(loaded_game);
+                state = 1; // Regresar al estado de juego después de cargar un juego
             }
         } else if (state == 1) {
             switch (ch) {
@@ -226,16 +281,52 @@ void *input_handler(void *arg) {
                     shoot();
                     break;
                 case 'q':
-                    running = 0;
+                    state = 0;
                     break;
                 case 's':
+                    // Cargar todos los juegos desde el archivo
+                    int num_games = load_games("saved_games.dat", saved_games, 3);
+                    num_games = min(num_games, MAX_SAVED_GAMES - 1);
+
                     Saved_Games game = {high_score,
                                         score, 
                                         {player.x, player.y},
-                                         0,
-                                         hp};  
+                                         num_games + 1,
+                                         hp};
+                    
+                    if (current_game == -1){
+                        int saved_game_successfull = 0, old_game_index = -1;
+
+                        for (int i = 0; i < MAX_SAVED_GAMES; i++){
+                            if(saved_games[i].lru == 0){
+                                saved_games[i] = game;
+                                saved_game_successfull = 1;
+                                break;
+                            }
+                            if(saved_games[i].lru == 1){
+                                old_game_index = i;
+                            }
+                        }
+
+                        if (!saved_game_successfull){
+                            for (int i = 0; i < MAX_SAVED_GAMES; i++){
+                                saved_games[i].lru--;
+                            }
+
+                            saved_games[old_game_index] = game;
+                        }
+                    } else{
+                        for (int i = 0; i < MAX_SAVED_GAMES; i++){
+                            if (saved_games[i].lru > saved_games[current_game].lru){
+                                saved_games[i].lru--;
+                            }
+                        }
+
+                        saved_games[current_game] = game;
+                    }
+                    
                     // Guardar el juego en un archivo
-                    save_game("saved_game.dat", &game);
+                    save_game("saved_games.dat", saved_games);
                     break;
             }
         } else if (state == 2) {
@@ -376,14 +467,15 @@ int check_collision_enemies(Position *ship_parts, Position *parts, int size) {
     return 0;
 }
 
-void save_game(const char *filename, Saved_Games *game) {
-    FILE *file = fopen(filename, "wb");
+
+void save_game(const char *filename, Saved_Games *saved_games) {
+    FILE *file = fopen(filename, "wb"); // Abre el archivo en modo append binario
     if (file == NULL) {
         perror("Error opening file for writing");
         return;
     }
 
-    size_t written = fwrite(game, sizeof(Saved_Games), 1, file);
+    size_t written = fwrite(saved_games, sizeof(Saved_Games), MAX_SAVED_GAMES, file);
     if (written != 1) {
         perror("Error writing to file");
     }
@@ -391,21 +483,27 @@ void save_game(const char *filename, Saved_Games *game) {
     fclose(file);
 }
 
-void load_game(const char *filename, Saved_Games *game) {
+int load_games(const char *filename, Saved_Games saved_games[MAX_SAVED_GAMES], int max_games) {
     FILE *file = fopen(filename, "rb");
     if (file == NULL) {
         perror("Error opening file for reading");
-        return;
+        return 0;
     }
 
-    size_t read = fread(game, sizeof(Saved_Games), 1, file);
-    if (read != 1) {
+    size_t read = fread(saved_games, sizeof(Saved_Games), max_games, file);
+    if (ferror(file)) {
         perror("Error reading from file");
     }
 
     fclose(file);
-}
 
+    int cant_games = 0;
+    for (int i = 0; i < max_games; i++){
+        cant_games += saved_games[i].lru > 0;
+    }
+
+    return cant_games;
+}
 
 // Dibuja los bordes de la pantalla
 void draw_borders() {
@@ -511,5 +609,19 @@ void draw_game_over_screen() {
     mvprintw(LINES / 2 + 1, COLS / 2 - 10, "Press 'q' to Quit");
     mvprintw(LINES / 2 + 2, COLS / 2 - 10, "Score: %d", score);
     mvprintw(LINES / 2 + 3, COLS / 2 - 10, "High Score: %d", high_score);
+    refresh();
+}
+
+void display_games(Saved_Games saved_games[], int num_games) {
+    clear();
+    int row = 2; // Iniciar en la fila 2 para dejar espacio para el encabezado
+    for (int i = 0; i < num_games; i++) {
+        mvprintw(row, 2, "Game %d:", i + 1);
+        mvprintw(row + 1, 4, "High Score: %d", saved_games[i].high_score);
+        mvprintw(row + 2, 4, "LRU: %d", saved_games[i].lru);
+        mvprintw(row + 3, 4, "Health Points: %d", saved_games[i].health_points);
+        mvprintw(row + 4, 4, "Score: %d", saved_games[i].score);
+        row += 6; // Saltar 6 filas entre juegos para dejar espacio
+    }
     refresh();
 }
