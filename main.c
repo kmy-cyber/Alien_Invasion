@@ -1,3 +1,4 @@
+#pragma region _DEFINICIONES_Y_MACROS
 #include <ncurses.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -53,7 +54,9 @@ typedef struct
 //     struct Boss asd;
 //     asd.
 // }
+#pragma endregion
 
+#pragma region VARIABLES_GLOBALES
 // Variables globales
 Position player;                               // Posición del jugador
 Projectile projectiles[MAX_PROJECTILES];       // Array de proyectiles del jugador
@@ -64,6 +67,7 @@ Saved_Games saved_games[MAX_SAVED_GAMES];
 Saved_Games loaded_game;
 clock_t start_time;  // Tiempo inicial
 double elapsed_time; // Tiempo transcurrido
+int schedule_fifo_enemy[MAX_ENEMIES];
 
 int running = 1;    // Variable para controlar el estado de ejecución del juego
 int score = 0;      // Puntuación del jugador
@@ -71,8 +75,12 @@ int hp = 3;         // Vida del jugador
 int high_score = 0; // Mejor puntuación alcanzada
 int state = 0;      // Estado del juego (0: inicio, 1: jugando, 2: fin del juego)
 int current_game = -1;
+int enemy_died = 0;
 pthread_mutex_t mutex; // Mutex para sincronizar acceso a recursos compartidos
 
+#pragma endregion 
+
+#pragma region DECLARACIONES_DE_FUNCIONES_PRINCIPALES
 // Funciones del juego
 void init_game();                // Inicializa el juego al iniciar una nueva partida
 void *game_loop(void *arg);      // Bucle principal del juego
@@ -100,6 +108,9 @@ void save_game(const char *filename, Saved_Games *game);          // Guarda part
 int load_games(const char *filename, Saved_Games *game, int max); // Carga partidas guardadas
 void display_games(Saved_Games saved_games[], int num_games);     // Muestra las partidas guardadas
 
+#pragma endregion
+
+#pragma region FUNCION_PRINCIPAL
 // Función principal del programa
 int main()
 {
@@ -142,6 +153,13 @@ void init_game()
     score = 0;            // Resetea la puntuación
     hp = 3;               // Resetea la vida del jugador
 
+    // Inicializa el arreglo de scheduler para la generacion de enemigos
+    enemy_died = MAX_ENEMIES;
+    for (int i = 0; i < MAX_ENEMIES; i++)
+    {
+        schedule_fifo_enemy[i] = i + 1;
+    }
+
     // Desactiva todos los proyectiles y enemigos al inicio de una nueva partida
     for (int i = 0; i < MAX_PROJECTILES; i++)
     {
@@ -167,6 +185,13 @@ void startload_game(Saved_Games saved)
     hp = saved.health_points;      // Indica la vida del jugador al valor cargado
     high_score = saved.high_score; // Indica la mejor puntuacion al valor cargado
 
+    // Inicializa el arreglo de scheduler para la generacion de enemigos
+    enemy_died = MAX_ENEMIES;
+    for (int i = 0; i < MAX_ENEMIES; i++)
+    {
+        schedule_fifo_enemy[i] = i + 1;
+    }
+
     // Desactiva todos los proyectiles y enemigos al inicio de una nueva partida
     for (int i = 0; i < MAX_PROJECTILES; i++)
     {
@@ -182,6 +207,9 @@ void startload_game(Saved_Games saved)
     }
 }
 
+#pragma endregion
+
+#pragma region BUCLE_PRINCIPAL
 // Bucle principal del juego, controla el estado del juego y actualiza la pantalla según el estado actual
 void *game_loop(void *arg)
 {
@@ -292,6 +320,9 @@ void *game_loop(void *arg)
     return NULL;
 }
 
+#pragma endregion
+
+#pragma region MANEJO_ENTRADA
 // Maneja la entrada del usuario para controlar el juego
 void *input_handler(void *arg)
 {
@@ -465,6 +496,9 @@ void *input_handler(void *arg)
     return NULL;
 }
 
+#pragma endregion
+
+#pragma region FUNCIONES_DE_ACTUALIZACION
 // Mueve al jugador según la dirección ingresada por el usuario
 void move_player(int direction)
 {
@@ -520,17 +554,42 @@ void update_enemies()
             if (enemies[i].pos.y >= LINES - 3)
             {
                 enemies[i].is_active = 0;
+                schedule_fifo_enemy[i] = enemy_died + 1;
+                enemy_died++;
             }
         }
-        else
+    }
+    
+    int lenght_cicle = enemy_died;
+
+    mvprintw(LINES - 2, 2, "(%d): ", enemy_died);
+    for (int i = 0; i < MAX_ENEMIES; i++)
+    {
+        mvprintw(LINES - 2, 2 * (i + 1), "%d ", schedule_fifo_enemy[i]);
+    }
+    
+
+    for (int i = 0; i < lenght_cicle; i++)
+    {
+        if (enemy_died >= 1 && rand() % 100 < 5)
         {
-            if (rand() % 100 < 5)
+            for (int i = 0; i < MAX_ENEMIES; i++)
             {
-                enemies[i].pos.x = 2 + rand() % (COLS - 4);
-                enemies[i].pos.y = 3;
-                enemies[i].is_active = 1;
-                enemies[i].type = rand() % 3; // 3 tipos de enemigos
+                if(schedule_fifo_enemy[i] == 1)
+                {
+                    enemies[i].pos.x = 2 + rand() % (COLS - 4);
+                    enemies[i].pos.y = 3;
+                    enemies[i].is_active = 1;
+                    enemies[i].type = rand() % 3; // 3 tipos de enemigos
+                }
+
+                if(schedule_fifo_enemy[i] >= 1)
+                {
+                    schedule_fifo_enemy[i]--;
+                }
             }
+
+            enemy_died--;
         }
     }
 }
@@ -631,6 +690,9 @@ void update_boss_projectiles()
     }
 }
 
+#pragma endregion
+
+#pragma region FUNCIONES_CHECK_COLISIONES
 // Verifica colisiones entre proyectiles y enemigos, y entre el jugador y enemigos
 void check_collisions()
 {
@@ -717,6 +779,9 @@ void check_collisions()
             if (check_collision_enemies(ship_parts, enemy_parts, 5))
             { // Comprueba colision entre jugador y enemigos
                 enemies[i].is_active = 0;
+                schedule_fifo_enemy[i] = enemy_died + 1;
+                enemy_died++;
+
                 hp--; // Resta la vida por colision
                 break;
             }
@@ -766,50 +831,9 @@ int check_collision_boss(Position boss_projectile, Position *ship_parts, int siz
     return 0;
 }
 
-void save_game(const char *filename, Saved_Games *saved_games)
-{
-    FILE *file = fopen(filename, "wb"); // Abre el archivo en modo append binario
-    if (file == NULL)
-    {
-        perror("Error opening file for writing");
-        return;
-    }
+#pragma endregion
 
-    size_t written = fwrite(saved_games, sizeof(Saved_Games), MAX_SAVED_GAMES, file);
-    if (written != 1)
-    {
-        perror("Error writing to file");
-    }
-
-    fclose(file);
-}
-
-int load_games(const char *filename, Saved_Games saved_games[MAX_SAVED_GAMES], int max_games)
-{
-    FILE *file = fopen(filename, "rb");
-    if (file == NULL)
-    {
-        perror("Error opening file for reading");
-        return 0;
-    }
-
-    size_t read = fread(saved_games, sizeof(Saved_Games), max_games, file);
-    if (ferror(file))
-    {
-        perror("Error reading from file");
-    }
-
-    fclose(file);
-
-    int cant_games = 0;
-    for (int i = 0; i < max_games; i++)
-    {
-        cant_games += saved_games[i].lru > 0;
-    }
-
-    return cant_games;
-}
-
+#pragma region FUNCIONES_DE_DIBUJO
 // Dibuja los bordes de la pantalla
 void draw_borders()
 {
@@ -880,6 +904,9 @@ void draw_enemy(int x, int y, int type)
     }
 }
 
+#pragma endregion
+
+#pragma region FUNCIONES_PUNTUACION_INICIO_FIN
 // Actualiza la puntuación basada en el tipo de enemigo derrotado
 void update_score(int type)
 {
@@ -928,6 +955,53 @@ void draw_game_over_screen()
     refresh();
 }
 
+#pragma endregion
+
+#pragma region FUNCIONES_GUARDADO_Y_CARGA
+void save_game(const char *filename, Saved_Games *saved_games)
+{
+    FILE *file = fopen(filename, "wb"); // Abre el archivo en modo append binario
+    if (file == NULL)
+    {
+        perror("Error opening file for writing");
+        return;
+    }
+
+    size_t written = fwrite(saved_games, sizeof(Saved_Games), MAX_SAVED_GAMES, file);
+    if (written != 1)
+    {
+        perror("Error writing to file");
+    }
+
+    fclose(file);
+}
+
+int load_games(const char *filename, Saved_Games saved_games[MAX_SAVED_GAMES], int max_games)
+{
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL)
+    {
+        perror("Error opening file for reading");
+        return 0;
+    }
+
+    size_t read = fread(saved_games, sizeof(Saved_Games), max_games, file);
+    if (ferror(file))
+    {
+        perror("Error reading from file");
+    }
+
+    fclose(file);
+
+    int cant_games = 0;
+    for (int i = 0; i < max_games; i++)
+    {
+        cant_games += saved_games[i].lru > 0;
+    }
+
+    return cant_games;
+}
+
 void display_games(Saved_Games saved_games[], int num_games)
 {
     clear();
@@ -943,3 +1017,4 @@ void display_games(Saved_Games saved_games[], int num_games)
     }
     refresh();
 }
+#pragma endregion
